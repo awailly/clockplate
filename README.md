@@ -10,11 +10,14 @@ structure.
 ## How it works
 
 - The 3-color panel takes ~24 s per refresh, so the firmware renders the
-  *upcoming* minute and starts the refresh 24 s early: the panel finishes
+  *upcoming* minute and starts the refresh early: the panel finishes
   flashing right when that minute starts.
-- No deep sleep — this is designed for USB power (e.g. an Inkplate with a
-  dead battery). Staying awake keeps the system clock accurate; SNTP
-  re-syncs against `NTP_SERVER` hourly in the background.
+- Battery friendly: deep sleep between refreshes, WiFi off except for an
+  hourly NTP re-sync done after the render (the ESP32 sleep clock drifts a
+  few seconds per hour; each sync snaps the alignment back), CPU at 80 MHz.
+  The ~24 s of panel work per minute still dominates consumption — e-paper
+  refreshing every minute is inherently costly, expect a day or two on the
+  stock cell rather than weeks.
 
 ## Build and flash
 
