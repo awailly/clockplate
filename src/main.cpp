@@ -23,12 +23,19 @@ Inkplate display;
 
 // how long before the minute boundary to start refreshing the panel
 constexpr time_t RENDER_LEAD_S = 26;
+// woken this much earlier to absorb boot + setup time, so the render still
+// starts at target - RENDER_LEAD_S
+constexpr time_t BOOT_MARGIN_S = 3;
 // how often to reconnect WiFi for an NTP re-sync
 constexpr time_t SYNC_INTERVAL_S = 3600;
 
 // Persistent across deep sleep, reset on power up.
 RTC_DATA_ATTR uint32_t bootCount = 0;
 RTC_DATA_ATTR time_t lastSyncEpoch = 0;
+// the minute the next wake should render, decided before going to sleep:
+// recomputing it after boot would skip a minute whenever the ~2s of boot
+// time pushes the arithmetic past the boundary
+RTC_DATA_ATTR time_t nextTarget = 0;
 
 const char *DAYS[] = {"dimanche", "lundi", "mardi", "mercredi",
                       "jeudi", "vendredi", "samedi"};
@@ -136,6 +143,12 @@ void setup()
     Serial.printf("\n\n[SETUP] clockplate starting, boot: %u\n", bootCount);
     ++bootCount;
 
+    // The TZ environment variable lives in RAM and is lost across deep
+    // sleep (the epoch survives, the timezone does not): restore it on
+    // every boot or localtime_r falls back to UTC.
+    setenv("TZ", TIMEZONE_TZ, 1);
+    tzset();
+
     // fresh power on: the clock is unusable until a first NTP sync
     if (!clockValid() && !ntpSync())
     {
@@ -152,9 +165,13 @@ void setup()
     }
     display.setTextWrap(false);
 
-    // next minute boundary at least RENDER_LEAD_S away, wait out any early wake
+    // use the target chosen before sleeping when it is still upcoming,
+    // otherwise (fresh boot, clock jump) the next boundary at least
+    // RENDER_LEAD_S away; wait out any early wake
     time_t now = time(nullptr);
-    time_t target = ((now + RENDER_LEAD_S) / 60) * 60 + 60;
+    time_t target = nextTarget;
+    if (target <= now || target - now > 120)
+        target = ((now + RENDER_LEAD_S) / 60) * 60 + 60;
     while (time(nullptr) < target - RENDER_LEAD_S)
         delay(100);
 
@@ -166,7 +183,8 @@ void setup()
     if (time(nullptr) - lastSyncEpoch > SYNC_INTERVAL_S)
         ntpSync();
 
-    deepSleepUntil(target + 60 - RENDER_LEAD_S);
+    nextTarget = target + 60;
+    deepSleepUntil(nextTarget - RENDER_LEAD_S - BOOT_MARGIN_S);
 }
 
 void loop()
