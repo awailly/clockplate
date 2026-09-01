@@ -14,6 +14,7 @@
 #endif
 
 #include <WiFi.h>
+#include <esp_sntp.h>
 #include <Inkplate.h>
 #include "config.h"
 #include "fonts/Roboto_12.h"
@@ -90,12 +91,23 @@ bool ntpSync()
         wifiOff();
         return clockValid(); // keep drifting on the old sync if we have one
     }
+    // getLocalTime() only checks that the clock is valid, which it already
+    // is on every re-sync, so it would return before the SNTP response
+    // arrives and WiFi would go down without the correction ever being
+    // applied: wait for the actual sync completion instead.
+    sntp_set_sync_status(SNTP_SYNC_STATUS_RESET);
     configTzTime(TIMEZONE_TZ, NTP_SERVER);
-    struct tm t;
-    bool ok = getLocalTime(&t, 10000);
+    bool ok = false;
+    for (int i = 0; i < 100 && !ok; i++)
+    {
+        delay(100);
+        ok = sntp_get_sync_status() == SNTP_SYNC_STATUS_COMPLETED;
+    }
     if (ok)
     {
         lastSyncEpoch = time(nullptr);
+        struct tm t;
+        localtime_r(&lastSyncEpoch, &t);
         Serial.printf("[TIME] synced: %02d:%02d:%02d\n", t.tm_hour, t.tm_min, t.tm_sec);
     }
     else
